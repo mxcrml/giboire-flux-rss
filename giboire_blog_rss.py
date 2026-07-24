@@ -35,6 +35,7 @@ SITEMAPS = [
 STATE_FILE = Path(__file__).parent / "state_giboire.json"
 FEED_FILE = Path(__file__).parent / "feed_giboire_blog.xml"
 MAX_ITEMS = 30
+SCRAPE_MAX = 40   # nb max d'articles récents à considérer (tri par lastmod)
 CONTENT_MAX = 2500
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -172,7 +173,14 @@ def main():
         sys.exit("Aucun article trouvé dans les sitemaps - site inaccessible ?")
     print(f"[info] {len(found)} articles au total (posts + conseils)")
 
-    for url, lastmod in sorted(found.items()):
+    # Ne considérer que les SCRAPE_MAX plus récents (lastmod décroissant) :
+    # inutile de scraper tout l'historique du blog.
+    recent = sorted(found.items(),
+                    key=lambda kv: kv[1] or "", reverse=True)[:SCRAPE_MAX]
+    recent_urls = {u for u, _ in recent}
+    print(f"[info] {len(recent)} articles récents retenus")
+
+    for url, lastmod in recent:
         if url in state:
             continue
         try:
@@ -184,7 +192,7 @@ def main():
             print(f"[erreur] {url} : {e}", file=sys.stderr)
 
     for url in state:
-        state[url]["active"] = url in found
+        state[url]["active"] = url in recent_urls
 
     STATE_FILE.write_text(json.dumps(state, ensure_ascii=False, indent=1))
 
@@ -199,7 +207,9 @@ def main():
     active = [d for d in state.values() if d.get("active")]
     active.sort(key=lambda d: d["published"], reverse=True)
 
-    for d in active[:MAX_ITEMS]:
+    # feedgen insère chaque entrée en tête : on ajoute du plus ancien au
+    # plus récent pour obtenir un fichier trié newest-first (standard RSS).
+    for d in reversed(active[:MAX_ITEMS]):
         fe = fg.add_entry()
         fe.id(d["url"])
         fe.link(href=d["url"])
